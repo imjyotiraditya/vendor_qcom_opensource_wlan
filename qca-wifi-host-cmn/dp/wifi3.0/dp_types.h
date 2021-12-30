@@ -132,6 +132,12 @@
 #define FISA_FLOW_MAX_AGGR_COUNT        16 /* max flow aggregate count */
 #endif
 
+#ifdef WLAN_FEATURE_RX_PREALLOC_BUFFER_POOL
+#define DP_RX_REFILL_BUFF_POOL_SIZE  2048
+#define DP_RX_REFILL_BUFF_POOL_BURST 64
+#define DP_RX_REFILL_THRD_THRESHOLD  512
+#endif
+
 enum rx_pktlog_mode {
 	DP_RX_PKTLOG_DISABLED = 0,
 	DP_RX_PKTLOG_FULL,
@@ -832,6 +838,22 @@ struct reo_desc_list_node {
 #endif
 };
 
+#ifdef WLAN_DP_FEATURE_DEFERRED_REO_QDESC_DESTROY
+#define REO_DESC_DEFERRED_FREELIST_SIZE 256
+#define REO_DESC_DEFERRED_FREE_MS 30000
+
+struct reo_desc_deferred_freelist_node {
+	qdf_list_node_t node;
+	unsigned long free_ts;
+	void *hw_qdesc_vaddr_unaligned;
+	qdf_dma_addr_t hw_qdesc_paddr;
+	uint32_t hw_qdesc_alloc_size;
+#ifdef REO_QDESC_HISTORY
+	uint8_t peer_mac[QDF_MAC_ADDR_SIZE];
+#endif /* REO_QDESC_HISTORY */
+};
+#endif /* WLAN_DP_FEATURE_DEFERRED_REO_QDESC_DESTROY */
+
 #ifdef WLAN_FEATURE_DP_EVENT_HISTORY
 /**
  * struct reo_cmd_event_record: Elements to record for each reo command
@@ -1134,13 +1156,12 @@ struct rx_buff_pool {
 };
 
 struct rx_refill_buff_pool {
-	qdf_nbuf_t buf_head;
-	qdf_nbuf_t buf_tail;
-	qdf_spinlock_t bufq_lock;
-	uint32_t bufq_len;
-	uint32_t max_bufq_len;
-	bool in_rx_refill_lock;
 	bool is_initialized;
+	uint16_t head;
+	uint16_t tail;
+	struct dp_pdev *dp_pdev;
+	uint16_t max_bufq_len;
+	qdf_nbuf_t buf_elem[2048];
 };
 
 #ifdef DP_TX_HW_DESC_HISTORY
@@ -1382,6 +1403,8 @@ struct dp_swlm_stats {
  *			      ending the coalescing.
  * @tcl.coalesce_end_time: End timestamp for current coalescing session
  * @tcl.bytes_coalesced: Num bytes coalesced in the current session
+ * @tcl.tx_pkt_thresh: Threshold for TX packet count, to begin TCL register
+ *		       write coalescing
  */
 struct dp_swlm_params {
 	struct {
@@ -1395,6 +1418,7 @@ struct dp_swlm_params {
 		uint32_t tx_thresh_multiplier;
 		uint64_t coalesce_end_time;
 		uint32_t bytes_coalesced;
+		uint32_t tx_pkt_thresh;
 	} tcl;
 };
 
@@ -1859,6 +1883,12 @@ struct dp_soc {
 #ifdef FEATURE_RUNTIME_PM
 	/* Dp runtime refcount */
 	qdf_atomic_t dp_runtime_refcount;
+#endif
+
+#ifdef WLAN_DP_FEATURE_DEFERRED_REO_QDESC_DESTROY
+	qdf_list_t reo_desc_deferred_freelist;
+	qdf_spinlock_t reo_desc_deferred_freelist_lock;
+	bool reo_desc_deferred_freelist_init;
 #endif
 };
 
